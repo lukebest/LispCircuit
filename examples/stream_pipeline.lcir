@@ -1,0 +1,45 @@
+(defmodule Src
+  :params ((N 4) (W 8))
+  :ports ((out s_out (stream (uint W)))
+          (out done (uint 1)))
+  :state ((i :type (uint 8) :init 0))
+  :comb ((assign (valid s_out) (< i N))
+         (assign (bits s_out) (trunc i W))
+         (assign done (== i N)))
+  (defrule go
+    :guard (and (valid s_out) (ready s_out))
+    :body ((set! i (+ i 1)))))
+
+(defmodule Snk
+  :params ((W 8))
+  :ports ((in s_in (stream (uint W)))
+          (out seen (uint 8))
+          (out last (uint W)))
+  :state ((n :type (uint 8) :init 0)
+          (got :type (uint W) :init 0))
+  :comb ((assign (ready s_in) 1)
+         (assign seen n)
+         (assign last got))
+  (defrule take
+    :guard (and (valid s_in) (ready s_in))
+    :body ((check (== (bits s_in) n) "stream data out of order")
+           (set! got (bits s_in))
+           (set! n (+ n 1)))))
+
+(defsystem PipeTb
+  :instances ((src Src :params ((N 4) (W 8)))
+              (p stream-slice-forward :params ((W 8)))
+              (snk Snk :params ((W 8))))
+  :comb ((assign (valid p.s_in) (valid src.s_out))
+         (assign (bits p.s_in) (bits src.s_out))
+         (assign (ready src.s_out) (ready p.s_in))
+         (assign (valid snk.s_in) (valid p.s_out))
+         (assign (bits snk.s_in) (bits p.s_out))
+         (assign (ready p.s_out) (ready snk.s_in)))
+  (defrule watch
+    :guard (< snk.seen 4)
+    :body ((log info "seen" snk.seen "last" snk.last "done" src.done)))
+  (defrule stop
+    :guard (== snk.seen 4)
+    :priority 0
+    :body ((finish))))

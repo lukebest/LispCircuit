@@ -1,0 +1,19 @@
+;; Minimal cycle-accurate counter used to compare ESL and RTL logs.
+
+(defmodule Counter
+  :ports ((out y (uint 8)))
+  :state ((c :type (uint 8) :init 0))
+  :comb ((assign y c))
+  (defrule inc
+    :guard 1
+    :body ((set! c (+ c 1)))))
+
+(defsystem CounterTb
+  :instances ((dut Counter))
+  (defrule watch
+    :guard (< dut.y 4)
+    :body ((log info "y" dut.y)))
+  (defrule stop
+    :guard (== dut.y 4)
+    :priority 0
+    :body ((finish))))

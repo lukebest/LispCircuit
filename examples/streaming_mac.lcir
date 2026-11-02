@@ -1,0 +1,31 @@
+;; Streaming multiply-accumulate. The product is widened with sext so it
+;; matches the accumulator; the un-widened form is the ERR_WIDTH_MISMATCH
+;; case in the language tests.
+
+(defmodule StreamingMAC
+  :params ((AW 8) (BW 8) (ACCW 20))
+  :ports ((in a (sint AW))
+          (in b (sint BW))
+          (in en (uint 1))
+          (out acc (sint ACCW)))
+  :state ((acc_reg :type (sint ACCW) :init 0))
+  :comb ((assign acc acc_reg))
+  (defrule compute_mac
+    :guard en
+    :body ((let ((prod (*w a b)))
+             (set! acc_reg (+ acc_reg (sext prod ACCW)))))))
+
+(defsystem MacTb
+  :instances ((dut StreamingMAC :params ((AW 8) (BW 8) (ACCW 20))))
+  :state ((n :type (uint 8) :init 0))
+  (defrule step
+    :guard (< n 6)
+    :body ((drive dut.a 3)
+           (drive dut.b -2)
+           (drive dut.en 1)
+           (set! n (+ n 1))
+           (log info "acc" dut.acc "n" n)))
+  (defrule stop
+    :guard (== n 6)
+    :priority 0
+    :body ((finish))))

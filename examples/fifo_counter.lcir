@@ -1,0 +1,30 @@
+;; push wins over pop when both guards are true (priority 0 is higher).
+
+(defmodule FifoCnt
+  :ports ((in push (uint 1))
+          (in pop (uint 1))
+          (out cnt (uint 4)))
+  :state ((fifo_cnt :type (uint 4) :init 0))
+  :comb ((assign cnt fifo_cnt))
+  (defrule rule_push
+    :priority 0
+    :guard push
+    :body ((set! fifo_cnt (+ fifo_cnt 1))))
+  (defrule rule_pop
+    :priority 1
+    :guard pop
+    :body ((set! fifo_cnt (- fifo_cnt 1)))))
+
+(defsystem FifoTb
+  :instances ((dut FifoCnt))
+  :state ((t :type (uint 4) :init 0))
+  (defrule stim
+    :guard (< t 8)
+    :body ((drive dut.push (mux (< t 3) 1 0))
+           (drive dut.pop (mux (> t 1) 1 0))
+           (set! t (+ t 1))
+           (log info "cnt" dut.cnt "t" t)))
+  (defrule stop
+    :guard (== t 8)
+    :priority 0
+    :body ((finish))))

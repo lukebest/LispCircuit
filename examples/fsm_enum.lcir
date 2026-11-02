@@ -1,0 +1,29 @@
+(defenum State (IDLE RUN DONE))
+
+(defmodule Fsm
+  :ports ((in start (uint 1))
+          (out st_o State)
+          (out busy (uint 1)))
+  :state ((st :type State :init IDLE))
+  :comb ((assign st_o st)
+         (assign busy (mux (== st IDLE) 0 1)))
+  (defrule step
+    :guard 1
+    :body ((set! st (match st
+                      (IDLE (mux start RUN IDLE))
+                      (RUN DONE)
+                      (DONE IDLE)
+                      (:default IDLE))))))
+
+(defsystem FsmTb
+  :instances ((dut Fsm))
+  :state ((t :type (uint 4) :init 0))
+  (defrule stim
+    :guard (< t 5)
+    :body ((drive dut.start (mux (== t 1) 1 0))
+           (set! t (+ t 1))
+           (log info "st" dut.st_o "busy" dut.busy "t" t)))
+  (defrule stop
+    :guard (== t 5)
+    :priority 0
+    :body ((finish))))

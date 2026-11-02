@@ -1,0 +1,33 @@
+;; Latency-1 SRAM: the read address is presented this cycle and the
+;; data is visible the cycle after (read-first).
+
+(defmodule MemPipe
+  :ports ((in we (uint 1))
+          (in waddr (uint 4))
+          (in wdata (uint 8))
+          (in raddr (uint 4))
+          (out rdata (uint 8)))
+  :tables ((mem :depth 16 :type (uint 8) :ports (:r 1 :w 1) :latency 1))
+  :comb ((assign rdata (table-rdata mem)))
+  (defrule write
+    :guard we
+    :body ((table-write mem waddr wdata)))
+  (defrule read
+    :guard 1
+    :body ((table-read mem raddr))))
+
+(defsystem MemTb
+  :instances ((dut MemPipe))
+  :state ((t :type (uint 4) :init 0))
+  (defrule stim
+    :guard (< t 6)
+    :body ((drive dut.we (mux (== t 0) 1 0))
+           (drive dut.waddr 3)
+           (drive dut.wdata 42)
+           (drive dut.raddr 3)
+           (set! t (+ t 1))
+           (log info "rdata" dut.rdata "t" t)))
+  (defrule stop
+    :guard (== t 6)
+    :priority 0
+    :body ((finish))))
