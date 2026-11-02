@@ -6,6 +6,7 @@
          (struct-out info)
          (struct-out loc)
          current-diags
+         current-node-path
          diag-add!
          fail!
          flush-diags!
@@ -27,6 +28,14 @@
   #:transparent)
 
 (define current-diags (make-parameter #f))
+
+;; (file line col) -> path string or #f. Set by the CLI so diagnostics can
+;; carry a machine-usable node path; see nodepath.rkt.
+(define current-node-path (make-parameter (lambda (file line col) #f)))
+
+(define (diag-node-path d)
+  (and (diag-file d) (diag-line d) (diag-col d)
+       ((current-node-path) (diag-file d) (diag-line d) (diag-col d))))
 
 (define (info-path-str i)
   (cond
@@ -61,7 +70,7 @@
 
 (define (diag->jsexpr d)
   (define h (make-hasheq))
-  (hash-set! h 'error_code (string->symbol (diag-code d)))
+  (hash-set! h 'error_code (diag-code d))
   (hash-set! h 'location (diag-location d))
   (hash-set! h 'fix_suggestion (or (diag-suggestion d) ""))
   (when (diag-expected d) (hash-set! h 'expected_type (diag-expected d)))
@@ -69,8 +78,9 @@
   (when (diag-message d) (hash-set! h 'message (diag-message d)))
   (when (diag-loop d) (hash-set! h 'loop (diag-loop d)))
   (when (diag-line d) (hash-set! h 'line (diag-line d)))
-  (when (diag-col d) (hash-set! h 'col (diag-col d)))
+  (when (diag-col d) (hash-set! h 'col (add1 (diag-col d))))
   (when (diag-file d) (hash-set! h 'file (diag-file d)))
+  (let ([np (diag-node-path d)]) (when np (hash-set! h 'node_path np)))
   h)
 
 (define (diags->jsexpr ds)
@@ -88,8 +98,9 @@
              (and (diag-loop d) (format "  loop: ~a" (string-join (diag-loop d) " -> ")))
              (and (diag-suggestion d) (not (equal? (diag-suggestion d) ""))
                   (format "  fix: ~a" (diag-suggestion d)))
+             (let ([np (diag-node-path d)]) (and np (format "  node: ~a" np)))
              (and (diag-file d)
-                  (format "  at: ~a:~a:~a" (diag-file d) (or (diag-line d) "?") (or (diag-col d) "?"))))))
+                  (format "  at: ~a:~a:~a" (diag-file d) (or (diag-line d) "?") (if (diag-col d) (add1 (diag-col d)) "?"))))))
   (string-join lines "\n"))
 
 (define (format-diags ds)

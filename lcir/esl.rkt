@@ -39,7 +39,7 @@
 
 (define (snapshot st flat)
   (for/hash ([r (flatnet-regs flat)])
-    (values (symbol->string (freg-name r))
+    (values (freg-name r)
             (fmt-val (hash-ref st (freg-name r)) (freg-ty r)))))
 
 (define (fail-check info cyc msg st flat)
@@ -128,7 +128,8 @@
 (define (simulate flat
                   #:cycles cycles
                   #:top-name [top-name "top"]
-                  #:vcd [vcd #f])
+                  #:vcd [vcd #f]
+                  #:emit [emit void])
   (define order (topo-order flat))
   (define st0 (init-state flat))
   ;; Silent reset cycle: synchronous resets fire, reset-less regs update.
@@ -146,7 +147,9 @@
          (check-sides! (flatnet-sides flat) env mems st flat cyc)
          (check-exclusive! flat env mems st cyc)
          (define-values (lines finish?) (side-logs (flatnet-sides flat) env mems))
-         (set! logs (append logs (renumber lines cyc)))
+         (define new-lines (renumber lines cyc))
+         (for-each emit new-lines)
+         (set! logs (append logs new-lines))
          (define st2 (xfer st flat env mems #:reset? #f))
          (when dump (vcd-change dump (* (add1 cyc) 10) flat (eval-env st2 flat order)))
          (if finish? (add1 cyc) (loop (add1 cyc) st2))])))

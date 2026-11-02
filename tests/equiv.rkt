@@ -1,5 +1,6 @@
 #lang racket
-;; ESL log versus Verilator log for every shipped example.
+;; ESL log versus Verilator (SV backend) and g++ (C++ backend) logs for
+;; every shipped example. A missing g++ skips the C++ leg.
 
 (require racket/runtime-path
          racket/string
@@ -8,13 +9,30 @@
          "../lcir/flatten.rkt"
          "../lcir/sv.rkt"
          "../lcir/sv-tb.rkt"
+         "../lcir/cpp.rkt"
          "../lcir/nhir.rkt")
 
 (define-runtime-path examples-dir "../examples")
 (define-runtime-path build-dir "../build/equiv")
 
 (define examples
-  '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline"))
+  '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline" "datapath_mix"))
+
+(define gxx (find-executable-path "g++"))
+
+(define (run-cpp name sys dir)
+  (define src (build-path dir (format "~a.cpp" name)))
+  (define exe (build-path dir "cppsim"))
+  (call-with-output-file src #:exists 'replace
+    (lambda (o) (display (emit-cpp-sim (flatten-design sys) #:cycles cycles
+                                       #:top-name (symbol->string (hmod-name sys))) o)))
+  (unless (zero? (system*/exit-code gxx "-std=c++17" "-O1" "-o" (path->string exe) (path->string src)))
+    (error 'equiv "~a: g++ failed" name))
+  (define out (open-output-string))
+  (parameterize ([current-output-port out])
+    (unless (zero? (system*/exit-code exe))
+      (error 'equiv "~a: C++ simulation failed" name)))
+  (log-lines (get-output-string out)))
 
 (define cycles 20)
 
@@ -63,7 +81,10 @@
   (define rtl (log-lines (get-output-string out)))
   (unless (equal? esl rtl)
     (error 'equiv "~a mismatch\nESL ~s\nRTL ~s" name esl rtl))
-  (printf "~a match (~a lines)\n" name (length esl)))
+  (define cpp (and gxx (run-cpp name sys dir)))
+  (when (and cpp (not (equal? esl cpp)))
+    (error 'equiv "~a mismatch\nESL ~s\nC++ ~s" name esl cpp))
+  (printf "~a match: esl = rtl~a (~a lines)\n" name (if cpp " = c++" "") (length esl)))
 
 (for-each run-one examples)
 (displayln "equiv ok")

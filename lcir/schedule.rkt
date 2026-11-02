@@ -150,7 +150,7 @@
      (fail! (diag-at "ERR_WRITE_CONFLICT" info
                      #:message (format "rules ~a all write ~a and may fire together"
                                        (map wspec-rule specs) what)
-                     #:suggestion "Set :priority (lower number wins) or :conflict-free #t, or make the guards mutually exclusive"))]))
+                     #:suggestion "Set :priority (lower number wins) or :conflict-free t, or make the guards mutually exclusive"))]))
 
 (define (order-specs specs mode)
   (if (eq? mode 'prio)

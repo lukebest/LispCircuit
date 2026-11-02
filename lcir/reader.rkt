@@ -15,7 +15,8 @@
          kw?
          kw-name
          loc-of
-         atom?)
+         atom?
+         lcir-readtable)
 
 (struct L (loc d) #:transparent)
 
@@ -95,7 +96,17 @@
   (port-count-lines! in)
   (parameterize ([current-readtable lcir-readtable])
     (let loop ()
-      (define s (read-syntax src in))
+      (define s
+        (with-handlers ([exn:fail:read?
+                         (lambda (e)
+                           (define l (let ([ls (exn:fail:read-srclocs e)]) (and (pair? ls) (car ls))))
+                           (fail! (diag "ERR_PARSE" "reader" "Check parentheses and string quotes"
+                                        #f #f
+                                        (regexp-replace #rx"^[^ ]*: read-syntax: " (exn-message e) "")
+                                        #f
+                                        (and l (srcloc-line l)) (and l (srcloc-column l))
+                                        (and src (format "~a" src)))))])
+          (read-syntax src in)))
       (if (eof-object? s)
           '()
           (cons (rewrite-infix (stx->L s)) (loop))))))

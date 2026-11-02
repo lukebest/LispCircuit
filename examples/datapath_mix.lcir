@@ -1,0 +1,71 @@
+;; Datapath coverage for the ESL / C++ / SV / SMT backends: signed
+;; arithmetic, shifts, bundles, vectors with a dynamic index, slices,
+;; concatenation, enum match, a latency-0 table, and two prioritized rules.
+
+(defenum Op (ADD SUB SHL ASR))
+
+(defmodule Alu
+  :ports ((in op Op)
+          (in x (sint 8))
+          (in y (sint 8))
+          (out r (sint 8))
+          (out wide (sint 9)))
+  :comb ((assign r (match op
+                     (ADD (+ x y))
+                     (SUB (- x y))
+                     (SHL (<< x (u 3 2)))
+                     (ASR (>> x (u 3 1)))
+                     (:default x)))
+         (assign wide (-w x y))))
+
+(defmodule Mix
+  :ports ((in k (uint 4))
+          (out hist (vec 4 (uint 4)))
+          (out pair (bundle (lo (uint 4)) (hi (uint 4))))
+          (out pick (uint 4))
+          (out lut (uint 8))
+          (out sel Op)
+          (out res (sint 8))
+          (out wd (sint 9)))
+  :state ((v :type (vec 4 (uint 4)) :init (vlit 1 2 3 4))
+          (p :type (bundle (lo (uint 4)) (hi (uint 4))) :init (pack (lo 0) (hi 15)))
+          (acc :type (sint 8) :init -3))
+  :tables ((sq :depth 16 :type (uint 8) :ports (:r 1 :w 1) :latency 0))
+  :instances ((alu Alu))
+  :comb ((wire op_w Op (match (bits k 1 0) (0 ADD) (1 SUB) (2 SHL) (:default ASR)))
+         (assign alu.op op_w)
+         (assign alu.x acc)
+         (assign alu.y (as-sint (cat (u 4 0) k)))
+         (assign hist v)
+         (assign pair p)
+         (assign pick (idx v (bits k 1 0)))
+         (assign lut (table-read sq (^ k (u 4 1))))
+         (assign sel op_w)
+         (assign res alu.r)
+         (assign wd alu.wide))
+  (defrule shift_in
+    :guard 1
+    :priority 1
+    :body ((set! v (vlit k (idx v 0) (idx v 1) (idx v 2)))
+           (set! p (pack (lo k) (hi (field p lo))))
+           (table-write sq k (*w k k))
+           (set! acc alu.r)))
+  (defrule clamp
+    :guard (< acc (s 8 -30))
+    :priority 0
+    :body ((set! acc (s 8 30)))))
+
+(defsystem MixTb
+  :instances ((dut Mix))
+  :state ((t :type (uint 4) :init 0))
+  (defrule stim
+    :guard (< t 12)
+    :body ((drive dut.k (^ t (u 4 5)))
+           (set! t (+ t 1))
+           (log info "t" t "sel" dut.sel "res" dut.res "wd" dut.wd "pick" dut.pick
+                "lut" dut.lut "pair" dut.pair "hist" dut.hist)
+           (check (!= dut.wd (s 9 255)) "wide difference out of range")))
+  (defrule stop
+    :guard (== t 12)
+    :priority 0
+    :body ((finish))))

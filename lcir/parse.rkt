@@ -68,7 +68,9 @@
     [(eq? d #f) #f]
     [(eq? d 'true) #t]
     [(eq? d 'false) #f]
-    [else (failp "ERR_PARSE" lx (format "~a: expected #t or #f" who))]))
+    [(eq? d 't) #t]
+    [(eq? d 'nil) #f]
+    [else (failp "ERR_PARSE" lx (format "~a: expected t or nil" who))]))
 
 (define (sym+ a b)
   (string->symbol (string-append (symbol->string a) b)))

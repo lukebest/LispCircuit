@@ -18,7 +18,10 @@
 (struct tmpl (name kind params body file lib? info) #:transparent)
 
 (define (load-forms path)
-  (define forms (read-lcir-file path))
+  (expand-includes (read-lcir-file path) path))
+
+(define (expand-includes forms path)
+  (define base (or (and (path-string? path) (path-only path)) (current-directory)))
   (append-map
    (lambda (f)
      (if (eq? (form-head f) 'include)
@@ -26,7 +29,7 @@
            (unless (string? arg)
              (fail! (diag-at "ERR_PARSE" (loc->info "include" (loc-of f))
                              #:message "include expects a string path")))
-           (load-forms (build-path (path-only path) arg)))
+           (load-forms (build-path base arg)))
          (list f)))
    forms))
 
@@ -140,7 +143,7 @@
 (define (compile-source str #:file [file "input.lcir"] #:prims? [prims? #t])
   (parameterize ([current-diags (box '())]
                  [current-macros (hash)])
-    (define user (read-lcir-port (open-input-string str) file))
+    (define user (expand-includes (read-lcir-port (open-input-string str) file) file))
     (define prims (if (and prims? (file-exists? prims-path)) (load-forms prims-path) '()))
     (compile-forms (append prims user) (and prims? prims-path))))
 

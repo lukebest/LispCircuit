@@ -1,6 +1,6 @@
 # LCIR 语言参考
 
-LCIR 源文件是 S-表达式。`;` 开始行注释。编译分两段：先展开宏和 `gen-for`，再对展开后的 Core LCIR 做强类型检查。
+LCIR 源文件（`.lcir`）是 S-表达式。`;` 开始行注释。源码必须能被 Emacs Lisp 的 `read` 读出：布尔值写 `t` / `nil`（`#t`/`#f` 仍可用但不推荐），不要用 `[ ]`、`#\c`、`?c`。`editors/lcir-mode.el` 提供高亮、缩进和 `C-c C-c` 检查。编译分两段：先展开宏和 `gen-for`，再对展开后的 Core LCIR 做强类型检查。
 
 ## 类型
 
@@ -24,7 +24,7 @@ LCIR 源文件是 S-表达式。`;` 开始行注释。编译分两段：先展�
   :params ((W 8) (DEPTH 4))
   :clocks (clk)                    ; 默认只有 clk。复位信号 rst 总是隐含的
   :ports ((in a (uint W)) (out y (uint W)))
-  :state ((r :type (uint W) :init 0 :reset-less #f :clock clk))
+  :state ((r :type (uint W) :init 0 :reset-less nil :clock clk))
   :tables ((mem :depth DEPTH :type (uint W) :ports (:r 1 :w 1) :latency 0))
   :instances ((child Other :params ((W W))))
   :comb ((wire t (uint W) (+ a r))
@@ -33,7 +33,7 @@ LCIR 源文件是 S-表达式。`;` 开始行注释。编译分两段：先展�
   (defalgo inc ((a (uint W))) (uint W) (+ a 1)))
 ```
 
-`:reset-less #t` 的寄存器综合成 `if (we) r <= next`，没有同步复位。控制寄存器保持默认同步复位。
+`:reset-less t` 的寄存器综合成 `if (we) r <= next`，没有同步复位。控制寄存器保持默认同步复位。
 
 存储器只有一个读口和一个写口。`latency 0` 的 `(table-read mem addr)` 是组合读，读到的是本拍提交前的旧值。`latency 1` 把 `(table-read mem addr)` 写成语句以发出读请求，下一拍用 `(table-rdata mem)` 取数。同拍写读同一地址时先读后写。
 
@@ -58,7 +58,7 @@ LCIR 源文件是 S-表达式。`;` 开始行注释。编译分两段：先展�
 ```lisp
 (defrule name
   :priority 0          ; 数字小的优先。可以不写
-  :conflict-free #f
+  :conflict-free nil
   :guard expr          ; (uint 1)
   :body ((set! r expr)
          (table-write mem addr data)
@@ -81,7 +81,7 @@ LCIR 源文件是 S-表达式。`;` 开始行注释。编译分两段：先展�
 
 ## 宏
 
-`defmacro` 的体是受限的 Racket。参数是未求值的 S-表达式，返回值会再展开。
+`defmacro` 的体是受限的 Racket（`racket/base` + `racket/list`，另有 `t`、`nil` 两个常量）。参数是未求值的 S-表达式，返回值会再展开。宏体也要遵守 Emacs 可读子集，例如 `let` 用圆括号写 `(let ((s e)) ...)`。
 
 ```lisp
 (defmacro regs (n)
@@ -119,9 +119,37 @@ racket lcir/cli.rkt check  file.lcir --diag json
 racket lcir/cli.rkt expand file.lcir
 racket lcir/cli.rkt sim    file.lcir --cycles 20 --dump-vcd out.vcd
 racket lcir/cli.rkt sv     file.lcir -o build/sv --cycles 20
+racket lcir/cli.rkt cpp    file.lcir -o build/cpp --cycles 20   # 然后 g++ -std=c++17 build/cpp/<Sys>.cpp
+racket lcir/cli.rkt smt    file.lcir -o out.smt2 --depth 20 [--top Module] [--run]
 ```
 
-`cpp` 和 `smt` 会返回 `ERR_BACKEND`。`--dump-fst` 需要本机有 `vcd2fst`。
+`--dump-fst` 需要本机有 `vcd2fst`。仿真日志逐拍输出；`check` 失败时之前各拍的日志已经打印。
+
+`cpp` 生成单文件 C++17 仿真器，日志与 ESL 逐行相同。所有值必须不超过 64 位。
+
+`smt` 生成 SMT-LIB v2（QF_ABV）。第一个查询是从复位后状态展开 `--depth` 拍的有界模型检查：`unsat` 表示这些拍内没有 `check` 会失败、互斥写者也不会同时激活。`--top` 指定一个模块时，它的输入端口在每拍都是自由变量。之后每个多写者寄存器一个查询，`unsat` 表示写者守卫互斥。`--run` 调用 z3。
+
+## 给 Agent 的接口
+
+节点路径从顶层形式开始，以 `/` 分隔，作用于宏展开前的源码：
+
+| 段 | 含义 |
+| --- | --- |
+| `module:X` `system:X` `enum:X` `macro:X` | 顶层定义 |
+| `rule:X` `algo:X` | 模块里的 `defrule` / `defalgo` |
+| `state:X` `table:X` `inst:X` `port:X` `wire:X` | `:state` `:tables` `:instances` `:ports` `:comb` 里的条目 |
+| `:kw` | 关键字后面的值 |
+| `N` | 第 N 个子元素，从 0 开始 |
+
+```
+racket lcir/cli.rkt query examples/counter.lcir --list
+racket lcir/cli.rkt query examples/counter.lcir module:Counter/rule:inc/:body/0
+racket lcir/cli.rkt query examples/counter.lcir --at 9:20
+racket lcir/cli.rkt patch examples/counter.lcir module:Counter/rule:inc/:body/0 \
+    --with '(set! c (+ c 2))' --in-place
+```
+
+`patch` 只替换该节点的源码区间，其余注释和排版保持不变。替换后会完整编译一遍，通过才写盘；不通过时返回诊断，原文件不动。不给 `-o` / `--in-place` 时打印新文本。
 
 ## 内置模块
 
@@ -131,4 +159,4 @@ racket lcir/cli.rkt sv     file.lcir -o build/sv --cycles 20
 
 ## 诊断
 
-失败时给出 JSON（`--diag json`）或文本。`location` 是节点路径，例如 `module:StreamingMAC -> rule:compute_mac -> stmt:(set! acc_reg ...)`。宽度不符时 `fix_suggestion` 会建议 `sext`、`zext` 或 `trunc`。组合环的 `loop` 字段是环上的信号名。
+失败时给出 JSON（`--diag json`）或文本。`line`/`col` 从 1 开始。`node_path` 是上面的机器路径，可以直接交给 `query` / `patch`。`location` 是给人看的路径，例如 `module:StreamingMAC -> rule:compute_mac -> stmt:(set! acc_reg ...)`。宽度不符时 `fix_suggestion` 会建议 `sext`、`zext` 或 `trunc`。组合环的 `loop` 字段是环上的信号名。

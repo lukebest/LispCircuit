@@ -165,7 +165,7 @@
      (define bits
        (for/list ([i (in-range n)])
          (define-values (fmt args)
-           (sv-fmt (e-idx e (e-lit i (ty-uint (max 1 (integer-length (max 1 i)))) (expr-info e))
+           (sv-fmt (e-idx e (e-lit i (ty-uint (max 1 (clog2 n))) (expr-info e))
                           elem (expr-info e))))
          (cons fmt args)))
      (values (format "[~a]" (string-join (map car bits) ","))
