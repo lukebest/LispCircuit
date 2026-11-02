@@ -1,7 +1,7 @@
 RACKET ?= racket
 EMACS ?= emacs
 CLI = $(RACKET) lcir/cli.rkt
-EXAMPLES = counter streaming_mac fifo_counter fsm_enum sram_lat1 stream_pipeline datapath_mix
+EXAMPLES = counter streaming_mac fifo_counter fsm_enum sram_lat1 stream_pipeline datapath_mix afifo
 
 .PHONY: test unit patch smt emacs equiv examples cpp
 

@@ -1,0 +1,94 @@
+;; Asynchronous FIFO built on the async-fifo primitive (gray pointers and
+;; two-flop synchronizers). The producer offers 0, 1, 2, ... with a bursty
+;; valid; the consumer pops with a bursty ready and checks the order.
+;; Both sides also count beats so the logs show occupancy and backpressure.
+
+(defmodule Producer
+  :params ((W 8) (N 12))
+  :clocks (clk_w)
+  :ports ((out s_out (stream (uint W)))
+          (out sent (uint 8)))
+  :state ((i :type (uint 8) :init 0)
+          (t :type (uint 4) :init 0))
+  :comb ((wire offer (uint 1) (and (< i N) (!= (bits t 1 0) 3)))
+         (assign (valid s_out) offer)
+         (assign (bits s_out) (trunc i W))
+         (assign sent i))
+  (defrule tick
+    :guard 1
+    :body ((set! t (+ t 1))))
+  (defrule push
+    :guard (and (valid s_out) (ready s_out))
+    :body ((set! i (+ i 1)))))
+
+(defmodule Consumer
+  :params ((W 8))
+  :clocks (clk_r)
+  :ports ((in s_in (stream (uint W)))
+          (out got (uint 8))
+          (out last (uint W)))
+  :state ((n :type (uint 8) :init 0)
+          (d :type (uint W) :init 0)
+          (t :type (uint 4) :init 0))
+  :comb ((assign (ready s_in) (== (bits t 0 0) 0))
+         (assign got n)
+         (assign last d))
+  (defrule tick
+    :guard 1
+    :body ((set! t (+ t 1))))
+  (defrule pop
+    :guard (and (valid s_in) (ready s_in))
+    :body ((check (== (bits s_in) (trunc n W)) "afifo data out of order")
+           (set! d (bits s_in))
+           (set! n (+ n 1)))))
+
+(defsystem AfifoTb
+  :clocks (clk clk_w clk_r)
+  :instances ((prod Producer :params ((W 8) (N 12)))
+              (fifo async-fifo :params ((W 8) (DEPTH 4)))
+              (cons Consumer :params ((W 8))))
+  :state ((cyc :type (uint 8) :init 0))
+  :comb ((assign (valid fifo.s_in) (valid prod.s_out))
+         (assign (bits fifo.s_in) (bits prod.s_out))
+         (assign (ready prod.s_out) (ready fifo.s_in))
+         (assign (valid cons.s_in) (valid fifo.s_out))
+         (assign (bits cons.s_in) (bits fifo.s_out))
+         (assign (ready fifo.s_out) (ready cons.s_in)))
+  (defrule tick
+    :guard 1
+    :body ((set! cyc (+ cyc 1))
+           (check (< cyc 80) "afifo did not drain")
+           (log info "sent" prod.sent "got" cons.got "last" cons.last
+                "wrdy" (ready prod.s_out) "rvld" (valid cons.s_in))))
+  (defrule stop
+    :guard (== cons.got 12)
+    :priority 0
+    :body ((finish))))
+
+;; Formal harness: `lcir smt examples/afifo.lcir --top AfifoProp --depth 16 --run`.
+;; push_v / pop_r are free inputs every cycle. The written data is the write
+;; count, so any loss, duplication or reordering makes a popped value differ
+;; from the read count.
+(defmodule AfifoProp
+  :clocks (clk clk_w clk_r)
+  :ports ((in push_v (uint 1))
+          (in pop_r (uint 1)))
+  :instances ((fifo async-fifo :params ((W 4) (DEPTH 4))))
+  :state ((wcnt :type (uint 4) :init 0)
+          (rcnt :type (uint 4) :init 0))
+  :comb ((wire push (uint 1) (and (valid fifo.s_in) (ready fifo.s_in)))
+         (wire pop (uint 1) (and (valid fifo.s_out) (ready fifo.s_out)))
+         (assign (valid fifo.s_in) push_v)
+         (assign (bits fifo.s_in) wcnt)
+         (assign (ready fifo.s_out) pop_r))
+  (defrule wr
+    :guard push
+    :body ((set! wcnt (+ wcnt 1))))
+  (defrule rd
+    :guard pop
+    :body ((check (== (bits fifo.s_out) rcnt) "afifo lost, duplicated or reordered data")
+           (check (!= (- wcnt rcnt) 0) "afifo popped while empty")
+           (set! rcnt (+ rcnt 1))))
+  (defrule bound
+    :guard 1
+    :body ((check (<= (- wcnt rcnt) 4) "afifo holds more than DEPTH entries"))))

@@ -149,7 +149,7 @@ Pass 与 Target 编号在全文统一使用上图（v1 中 §1.2 与 §3/§4 的
 ### 6.4 T4：形式化（SMT-LIB v2）🟡（`lcir smt FILE [-o OUT.smt2] [--depth K] [--top NAME] [--run]`）
 * **BMC**：从复位后状态展开 K 拍；`sat` ⇔ K 拍内某个 `check` 会失败，或声明互斥/`:conflict-free` 的写者同时激活（且此前未 `finish`）。`--top` 指定模块时，其输入端口为每拍自由变量，结论对所有输入序列成立。
 * **写者互斥性**：对每个多写者寄存器，查询任意两条守卫在自由状态下能否同真；`unsat` 即组合意义上互斥（可能比可达状态下的结论更保守）。
-* `--run` 调用 z3 并以 `pass`/`fail` 汇总；未安装 z3 时报 `ERR_BACKEND`。
+* `--run` 调用 z3 并以 `pass`/`fail` 汇总；`fail` 时输出**反例轨迹**（每拍自由输入与顶层寄存器取值，标出失败拍），供人或 Agent 直接定位；未安装 z3 时报 `ERR_BACKEND`。
 * 无 z3 时，`tests/smt-smoke.rkt` 用内置的 SMT 子集求值器对系统顶层（全具体值）逐拍对比 ESL。
 * 规划 ⏳：死锁/活性证明（stream `valid` 持续而 `ready` 永不到来的有界检测）、k-induction 无界证明、SV 与 NHIR 的组合等价性。
 
@@ -204,4 +204,4 @@ racket lcir/cli.rkt patch  FILE PATH --with SEXP [-o OUT | --in-place] [--dry-ru
 | `make test` | 单元测试（类型/展开/调度/诊断）、`patch-smoke`（query/patch）、`smt-smoke`（SMT 对 ESL）、`emacs`（Emacs 可读性 + lcir-mode 字节编译） |
 | `make equiv` | 全部示例 ESL = Verilator = g++ 三方日志一致 |
 
-示例集必须覆盖：计数器、有符号 MAC、优先级写冲突、枚举 FSM、latency-1 SRAM、stream 流水线、综合数据通路（`datapath_mix`：sint 移位、bundle、向量动态下标、切片/拼接、latency-0 表、优先级规则）。新增语言特性时须同时扩充示例，使三方对拍覆盖之。
+示例集必须覆盖：计数器、有符号 MAC、优先级写冲突、枚举 FSM、latency-1 SRAM、stream 流水线、综合数据通路（`datapath_mix`：sint 移位、bundle、向量动态下标、切片/拼接、latency-0 表、优先级规则）、异步 FIFO（`afifo`：三方对拍 + `AfifoProp` 任意输入下的 BMC 证明与变异反例）。新增语言特性时须同时扩充示例，使三方对拍覆盖之。

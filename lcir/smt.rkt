@@ -11,7 +11,8 @@
 ;; rules, are two guards satisfiable together over an unconstrained state?
 ;; unsat proves the rules are combinationally mutually exclusive.
 
-(require "lower-bits.rkt" "types.rkt" "diag.rkt" "flatten.rkt")
+(require (only-in racket/base [sort rsort])
+         "lower-bits.rkt" "types.rkt" "diag.rkt" "flatten.rkt")
 (provide emit-smt-text run-z3 smt-report-lines)
 
 (define (bvlit v w) (format "(_ bv~a ~a)" v w))
@@ -158,6 +159,15 @@
                     bad))
     (when (< k (sub1 depth)) (emit-next! p net k (add1 k) ref mem #f)))
   (p (format "(assert ~a)" (or* (reverse bad))))
+  ;; Terms whose model values form the counterexample trace when sat.
+  (define traced
+    (append (filter (lambda (n) (memq n free-inputs)) (map lwire-name (lnet-wires net)))
+            (for/list ([r (lnet-regs net)] #:unless (regexp-match? #rx"__" (symbol->string (lreg-name r))))
+              (lreg-name r))))
+  (p (format "; cex-terms: ~a"
+             (string-join (append (for*/list ([k (in-range depth)] [n traced]) (sym n k))
+                                  (for/list ([k (in-range depth)]) (format "|fail@~a|" k)))
+                          " ")))
   (p "(echo \"bmc\")")
   (p "(check-sat)")
   (p "(pop 1)")
@@ -201,12 +211,61 @@
          (fail! (diag-at "ERR_BACKEND" (info "smt" #f #f #f) #:message (format "solver error: ~a" (car ls))))]
         [else (cons (cons (car ls) (cadr ls)) (loop (cddr ls)))])))
   (define bmc (assoc "bmc" results))
-  (hasheq 'status (cond [(not bmc) "unknown"] [(equal? (cdr bmc) "unsat") "pass"] [(equal? (cdr bmc) "sat") "fail"] [else "unknown"])
+  (define trace (if (and bmc (equal? (cdr bmc) "sat")) (z3-trace z3 text) '()))
+  (hasheq 'trace trace
+          'status (cond [(not bmc) "unknown"] [(equal? (cdr bmc) "unsat") "pass"] [(equal? (cdr bmc) "sat") "fail"] [else "unknown"])
           'results (for/list ([r results]) (hasheq 'query (car r) 'result (cdr r)))))
 
+(define (smt-value v)
+  (match v
+    [(? exact-integer?) v]                                  ; #b... / #x...
+    [`(_ ,bv ,_) (string->number (substring (symbol->string bv) 2))]
+    ['true 1]
+    ['false 0]
+    [_ v]))
+
+;; Re-run the BMC prefix with get-value on the cex terms. Returns a list of
+;; per-cycle hashes: {cycle, values: {name: n}, fail: bool}, up to the first
+;; failing cycle.
+(define (z3-trace z3 text)
+  (define m (regexp-match #rx"; cex-terms: ([^\n]*)\n" text))
+  (define terms (if m (string-split (cadr m) " ") '()))
+  (define end (cdr (car (regexp-match-positions #rx"[(]echo \"bmc\"[)]\n[(]check-sat[)]\n" text))))
+  (define script (string-append "(set-option :produce-models true)\n" (substring text 0 end)
+                                (format "(get-value (~a))\n" (string-join terms " "))))
+  (define-values (sp out in err) (subprocess #f #f #f z3 "-in" "-smt2"))
+  (write-string script in)
+  (close-output-port in)
+  (define o (port->string out))
+  (subprocess-wait sp)
+  (close-input-port out)
+  (close-input-port err)
+  (define vals
+    (with-handlers ([exn:fail? (lambda (_) '())])
+      (define forms (with-input-from-string o (lambda () (let loop () (define x (read)) (if (eof-object? x) '() (cons x (loop)))))))
+      (or (for/first ([f forms] #:when (and (pair? f) (pair? (car f)))) f) '())))
+  (define by-cycle (make-hash))
+  (for ([pr vals])
+    (match (regexp-match #rx"^(.*)@([0-9]+)$" (symbol->string (car pr)))
+      [(list _ name k)
+       (hash-update! by-cycle (string->number k) (lambda (h) (hash-set h (string->symbol name) (smt-value (cadr pr)))) (hasheq))]
+      [_ (void)]))
+  (define cycles (rsort (hash-keys by-cycle) <))
+  (define first-fail (for/first ([k cycles] #:when (equal? (hash-ref (hash-ref by-cycle k) 'fail #f) 1)) k))
+  (for/list ([k cycles] #:when (or (not first-fail) (<= k first-fail)))
+    (define h (hash-ref by-cycle k))
+    (hasheq 'cycle k 'fail (equal? (hash-ref h 'fail #f) 1) 'values (hash-remove h 'fail))))
+
 (define (smt-report-lines res)
-  (cons (format "bmc: ~a" (hash-ref res 'status))
-        (for/list ([r (hash-ref res 'results)])
+  (append
+   (list (format "bmc: ~a" (hash-ref res 'status)))
+   (for/list ([t (hash-ref res 'trace '())])
+     (format "  cex cycle ~a:~a~a" (hash-ref t 'cycle)
+             (apply string-append
+                    (for/list ([kv (rsort (hash->list (hash-ref t 'values)) symbol<? #:key car)])
+                      (format " ~a=~a" (car kv) (cdr kv))))
+             (if (hash-ref t 'fail) "   <- check fails" "")))
+   (for/list ([r (hash-ref res 'results)])
           (define q (hash-ref r 'query))
           (define v (hash-ref r 'result))
           (cond

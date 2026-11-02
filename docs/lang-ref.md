@@ -127,7 +127,7 @@ racket lcir/cli.rkt smt    file.lcir -o out.smt2 --depth 20 [--top Module] [--ru
 
 `cpp` 生成单文件 C++17 仿真器，日志与 ESL 逐行相同。所有值必须不超过 64 位。
 
-`smt` 生成 SMT-LIB v2（QF_ABV）。第一个查询是从复位后状态展开 `--depth` 拍的有界模型检查：`unsat` 表示这些拍内没有 `check` 会失败、互斥写者也不会同时激活。`--top` 指定一个模块时，它的输入端口在每拍都是自由变量。之后每个多写者寄存器一个查询，`unsat` 表示写者守卫互斥。`--run` 调用 z3。
+`smt` 生成 SMT-LIB v2（QF_ABV）。第一个查询是从复位后状态展开 `--depth` 拍的有界模型检查：`unsat` 表示这些拍内没有 `check` 会失败、互斥写者也不会同时激活。`--top` 指定一个模块时，它的输入端口在每拍都是自由变量。之后每个多写者寄存器一个查询，`unsat` 表示写者守卫互斥。`--run` 调用 z3。BMC 为 `sat` 时会再取模型，打印反例轨迹：每拍的自由输入和顶层寄存器，最后一拍标出失败的 `check`（`--diag json` 时在 `trace` 字段）。`examples/afifo.lcir` 里的 `AfifoProp` 是一个完整的形式化测试台写法。
 
 ## 给 Agent 的接口
 

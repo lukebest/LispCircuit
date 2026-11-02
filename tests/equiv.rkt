@@ -16,7 +16,7 @@
 (define-runtime-path build-dir "../build/equiv")
 
 (define examples
-  '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline" "datapath_mix"))
+  '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline" "datapath_mix" "afifo"))
 
 (define gxx (find-executable-path "g++"))
 
@@ -34,7 +34,7 @@
       (error 'equiv "~a: C++ simulation failed" name)))
   (log-lines (get-output-string out)))
 
-(define cycles 20)
+(define cycles 40)
 
 (define (log-lines text)
   (filter (lambda (ln) (regexp-match? #rx"^\\[cyc " ln))

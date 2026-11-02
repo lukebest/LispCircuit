@@ -93,7 +93,7 @@
   env)
 
 ;; Shipped examples: no check fails; SMT must say unsat.
-(for ([n '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline" "datapath_mix")])
+(for ([n '("counter" "streaming_mac" "fifo_counter" "fsm_enum" "sram_lat1" "stream_pipeline" "datapath_mix" "afifo")])
   (void (agree! n (compile-file (build-path examples-dir (format "~a.lcir" n))) 20)))
 
 ;; Wire values per cycle equal ESL log values (datapath coverage).
@@ -143,3 +143,19 @@ SRC
     (check-equal? (hash-ref res 'status) "pass")))
 
 (printf "smt smoke ok~a\n" (if z3 " (z3)" " (no z3: solver runs skipped)"))
+
+;; AFIFO formal harness (z3 only): the real property holds for 8 cycles of
+;; arbitrary push/pop; a deliberately wrong bound yields a counterexample
+;; trace whose last cycle is the failing one.
+(when z3
+  (define src (file->string (build-path examples-dir "afifo.lcir")))
+  (define (prop-result text depth)
+    (define d (compile-source text #:file (path->string (build-path examples-dir "afifo.lcir"))))
+    (define m (findf (lambda (h) (eq? (hmod-name h) 'AfifoProp)) (design-modules d)))
+    (run-z3 (emit-smt-text (flatten-design m) #:depth depth #:top-name "AfifoProp"
+                           #:free-inputs (hmod-input-names m))))
+  (check-equal? (hash-ref (prop-result src 8) 'status) "pass")
+  (define bad (prop-result (string-replace src "(<= (- wcnt rcnt) 4)" "(<= (- wcnt rcnt) 3)") 12))
+  (check-equal? (hash-ref bad 'status) "fail")
+  (check-true (hash-ref (last (hash-ref bad 'trace)) 'fail))
+  (displayln "afifo formal ok"))
